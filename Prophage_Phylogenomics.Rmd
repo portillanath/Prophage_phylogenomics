@@ -1,0 +1,182 @@
+---
+title: "Prophage_Phylogenomics"
+author: "Nathalia Portilla & Andrea Rodriguez"
+date: "`r Sys.Date()`"
+output: html_document
+runtime: shiny
+---
+
+## Phylo-genomics Project:
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(fuzzyjoin)
+library(ggplot2)
+
+#First we are going to know how many pro phages per genus interest we have
+
+data<-Infoprofagos
+list<-unique(factor(data$Genus))
+data<-subset.data.frame(data,data$Genus=="Pseudomonas"|data$Genus=="Clostridium"|data$Genus=="Klebsiella" | data$Genus=="Lactococcus")
+write.csv(data, file="prophagesubset.csv")
+
+list<-data%>%group_by(Genus)%>%summarise(Number_of_prophages=sum(`Number of Prophages`))
+
+```
+
+```{bash}
+
+##Filter pro-phage interest genus genomes
+module load seqkit seqkit/2.3.1
+
+seqkit grep -r -n -p '.*Pseudomonas.*' Finalprophages.fasta > subsetPseudomonas.fasta
+seqkit grep -r -n -p '.*Clostridium.*' Finalprophages.fasta > subsetClostridium.fasta
+seqkit grep -r -n -p '.*Klebsiella.*' Finalprophages.fasta > subsetKlebsiella.fasta
+seqkit grep -r -n -p '.*Lactococcus.*' Finalprophages.fasta > subsetLactococcus.fasta
+
+##Random Sampling  1/40 per Genus
+module load seqtk/1.3
+
+seqtk sample subsetPseudomonas.fasta 46 > sub3Pseudomonas.fasta
+seqtk sample subsetKlebsiella.fasta 50 > sub3Klebsiella.fasta
+seqtk sample subsetClostridium.fasta 11 > sub3Clostridium.fasta
+seqtk sample subsetLactococcus.fasta 7 > sub3Lactococcus.fasta
+
+cat sub3Pseudomonas.fasta sub3Klebsiella.fasta sub3Clostridium.fasta sub3Lactococcus.fasta>>subsetplusout.fasta
+
+##PRODIGAL
+
+module load prodigal/2.6.3
+
+mkdir ~/profagos/resultprodigal
+
+prodigal -i ~/profagos/sec_fastas/subsetplusout.fasta -a ~/profagos/resultprodigal/resultprodigalall.faa -d ~/profagos/resultprodigal/seqresultprodigal.fasta -s ~/profagos/resultprodigal/scores
+
+## VCONTACT2
+
+#Creating a conda enviroment 
+
+conda create --name vcontact2
+conda install vcontact2
+
+#Make sure of havind on the bin path mcl and ClusterONE files
+
+#Doing the gen2genome mapping
+
+module load anaconda/conda4.12.0
+source activate vcontact2
+
+export PATH="/hpcfs/home/ciencias_biologicas/na.portilla10/.conda/envs/vcontact2/bin:$PATH"
+
+module load diamond/2.0.15.153
+module load java/11.0.16.1
+
+gene2genome -p ~/profagos/resultprodigalall.faa -o ~/profagos/gene2genome/gene2genomeall.csv -s 'Prodigal-FAA'
+
+##Running VContact2
+
+module load anaconda/conda4.12.0
+source activate vcontact2
+
+export PATH="/hpcfs/home/ciencias_biologicas/na.portilla10/.conda/envs/vcontact2/bin:$PATH"
+
+module load diamond/2.0.15.153
+module load java/11.0.16.1
+
+vcontact2 --raw-proteins ~/profagos/resultprodigal/resultprodigalsub.faa --rel-mode Diamond --proteins-fp  ~/profagos/gene2genome/gene2genome.csv --db 'ProkaryoticViralRefSeq211-Merged' --c1-bin hpcfs/home/ciencias_biologicas/na.portilla10/.conda/envs/vcontact2/bin/cluster_one-1.0.jar -output-dir ~/profagos/gene2genome
+
+vcontact2 --raw-proteins ~/profagos/resultprodigal/resultprodigalsub.faa \
+--rel-mode ‘Diamond’ \
+--proteins-fp  ~/profagos/gene2genome/gene2genome.csv \
+--db ‘ProkaryoticViralRefSeq207-Merged’ \
+--pcs-mode MCL --vcs-mode ClusterONE \
+--c1-bin hpcfs/home/ciencias_biologicas/na.portilla10/.conda/envs/vcontact2/bin/cluster_one-1.0.jar\
+--output-dir ~/profagos/gene2genome -t 8
+
+```
+
+```{r setup, include=FALSE}
+#Set Up for VContact2 files
+
+#We want to see what patterns shared best VCs
+gene2genome<-genome_by_genome_overview
+quality_candidates<-subset.data.frame(gene2genome,Genera.in.VC=="1")
+quality_candidates<-subset.data.frame(quality_candidates,Topology.Confidence.Score>=0.5)
+quality_candidates<-subset.data.frame(quality_candidates,Quality>=0.5)
+quality_candidates<-subset.data.frame(quality_candidates,Family!="Unassigned")
+quality_candidates<-subset.data.frame(quality_candidates,Genus!="Unassigned")
+write.csv(gene2genome,file="vcontactgene2genome.csv")
+write.csv(quality_candidates,file="quality_candidates.csv")
+
+#Check Average
+summary<-quality_candidates%>%group_split(VC)%>% 
+map(~ .x %>% summarize(Average_Quality=mean(Quality)))%>%as.data.frame()
+names(summary)<-c(paste0(unique(factor(quality_candidates$VC))))
+summary<-t(summary)
+summary<-as.data.frame(summary)
+summary<-rownames_to_column(summary, var = "VC")
+colnames(summary)<-c("VC","Average_Quality")
+summary<-summary[order(summary$Average_Quality),]
+
+sum2<-regex_full_join(summary,quality_candidates)
+sum2<-sum2[,c(1:7)]
+
+#Plot at Genus
+ggplot(sum2, aes(x=Average_Quality, y = VC.x)) +
+geom_col(aes(fill = Genus), position = position_stack(reverse = TRUE)) +
+theme(legend.position = "top")
+
+#Plot at Family
+ggplot(sum2, aes(x=Average_Quality, y = VC.x)) +
+geom_col(aes(fill = Family), position = position_stack(reverse = TRUE)) +
+theme(legend.position = "top")
+
+#Arrange for network 
+network<-c1
+colnames(network)<-c("GenomeA","GenomeB","link")
+write.csv(network, file="network.csv")
+
+```
+
+## Inputs and Outputs
+
+You can embed Shiny inputs and outputs in your document. Outputs are automatically updated whenever inputs change. This demonstrates how a standard R plot can be made interactive by wrapping it in the Shiny `renderPlot` function. The `selectInput` and `sliderInput` functions create the input widgets used to drive the plot.
+
+```{r eruptions, echo=FALSE}
+inputPanel(
+  selectInput("n_breaks", label = "Number of bins:",
+              choices = c(10, 20, 35, 50), selected = 20),
+  
+  sliderInput("bw_adjust", label = "Bandwidth adjustment:",
+              min = 0.2, max = 2, value = 1, step = 0.2)
+)
+
+renderPlot({
+  hist(faithful$eruptions, probability = TRUE, breaks = as.numeric(input$n_breaks),
+       xlab = "Duration (minutes)", main = "Geyser eruption duration")
+  
+  dens <- density(faithful$eruptions, adjust = input$bw_adjust)
+  lines(dens, col = "blue")
+})
+```
+
+## Embedded Application
+
+It's also possible to embed an entire Shiny application within an R Markdown document using the `shinyAppDir` function. This example embeds a Shiny application located in another directory:
+
+```{r tabsets, echo=FALSE}
+shinyAppDir(
+  system.file("examples/06_tabsets", package = "shiny"),
+  options = list(
+    width = "100%", height = 550
+  )
+)
+```
+
+Note the use of the `height` parameter to determine how much vertical space the embedded application should occupy.
+
+You can also use the `shinyApp` function to define an application inline rather then in an external directory.
+
+In all of R code chunks above the `echo = FALSE` attribute is used. This is to prevent the R code within the chunk from rendering in the document alongside the Shiny components.
