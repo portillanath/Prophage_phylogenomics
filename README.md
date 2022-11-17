@@ -1,3 +1,3 @@
-This is ouy Phylogenomics Project
+This is our Phylogenomics Project
 
-Run Propahge_phylogenomics.Rmd 
+First We want predict tentative mark genes using VconTACT2, follow the file "Run Propahge_phylogenomics.Rmd"
