@@ -139,6 +139,40 @@ colnames(network)<-c("GenomeA","GenomeB","link")
 write.csv(network, file="network.csv")
 
 ```
+#From the use of the tool of GeneMarks we predict genes candidate for been core genes using the parameters Phage, output protein sequence. This algorithm use a non-supervised training procedure heuristic markov models of conding ans non coding regions Gibbs sampling 
+
+#From Prodigal we predict proteins
+
+```{bash}
+module load seqkit/2.3.0  
+seqkit rmdup gms.out.faa -s -i -o clean.faa -d duplicated.faa -D duplicated.detail.txt 
+#821 duplicated records removed
+seqkit rmdup resultprodigalall.faa -s -i -o cleanprodigal.faa -d duplicatedprodigal.faa -D duplicatedprodigal.detail.txt 
+
+
+#BLAST for conservative genes 
+
+#Create a consensus sequence from aligments from Conservative Protein Domain Families
+module load emboss/6.6.0
+cons -sequence alignPHA02535.fasta -outseq consensusPHA02535.fasta
+
+module load blast/2.12.0+ 
+
+#For create a new database (if you cancel interactive session log again the database)
+makeblastdb -in subsetplusoutprot.fasta -dbtype prot
+
+#Run blastp
+blastp -query PHA02535.1.fasta -db subsetplusoutprot.fasta -out outputblastPHA02535.csv -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore"
+
+
+
+
+
+
+
+
+
+```
 
 ## Inputs and Outputs
 
